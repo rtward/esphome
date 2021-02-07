@@ -10,7 +10,10 @@ MULTI_CONF = True
 
 wiegand_reader_ns = cg.esphome_ns.namespace('wiegand_reader')
 WiegandReader = wiegand_reader_ns.class_('WiegandReader', cg.PollingComponent)
-WiegandReaderTrigger = wiegand_reader_ns.class_('WiegandReaderTrigger', automation.Trigger.template(cg.std_string))
+WiegandReaderTrigger = wiegand_reader_ns.class_(
+    'WiegandReaderTrigger',
+    automation.Trigger.template(cg.std_string)
+)
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(WiegandReader),
