@@ -1,4 +1,13 @@
+#pragma once
+
 #include <stdint.h>
+
+/*
+ * This library was initially imported from https://github.com/paulo-raca/YetAnotherArduinoWiegandLibrary
+ */
+
+namespace esphome {
+namespace wiegand_reader {
 
 class Wiegand {
 public:
@@ -197,3 +206,6 @@ public:
       setPinState(bitValue, true);
     }
 };
+
+}
+}

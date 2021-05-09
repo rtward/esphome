@@ -1,17 +1,24 @@
 #include <Arduino.h>
 #include "Wiegand.h"
 
-#define PIN_0                        0x01
-#define PIN_1                        0x02
-#define DEVICE_CONNECTED             0x04
-#define DEVICE_INITIALIZED           0x08
+static const uint8_t PIN_0 = 0x01;
+static const uint8_t PIN_1 = 0x02;
+static const uint8_t DEVICE_CONNECTED = 0x04;
+static const uint8_t DEVICE_INITIALIZED = 0x08;
 
-#define ERROR_TRANSMISSION           0x10
-#define ERROR_TOO_BIG                0x20
+static const uint8_t ERROR_TRANSMISSION = 0x10;
+static const uint8_t ERROR_TOO_BIG = 0x20;
 
-#define MASK_PINS                    (PIN_0 | PIN_1)
-#define MASK_STATE                   0x0F
-#define MASK_ERRORS                  0xF0
+static const uint8_t MASK_PINS = (PIN_0 | PIN_1);
+static const uint8_t MASK_STATE = 0x0F;
+static const uint8_t MASK_ERRORS = 0xF0;
+
+/*
+ * This library was initially imported from https://github.com/paulo-raca/YetAnotherArduinoWiegandLibrary
+ */
+
+namespace esphome {
+namespace wiegand_reader {
 
 /**
  * Sets the value of the `i`-th data bit
@@ -305,4 +312,7 @@ void Wiegand::setPinState(uint8_t pin, bool pin_state) {
             }
         }
     }
+}
+
+}
 }
