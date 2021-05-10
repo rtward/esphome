@@ -45,5 +45,3 @@ def to_code(config):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID])
         cg.add(var.register_trigger(trigger))
         yield automation.build_automation(trigger, [(cg.std_string, "x")], conf)
-
-    cg.add_library("paulo-raca/Yet Another Arduino Wiegand Library", "2.0.0")
