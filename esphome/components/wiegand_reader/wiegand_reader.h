@@ -1,5 +1,6 @@
 #pragma once
 
+#include "esphome/core/hal.h"
 #include "esphome/core/component.h"
 #include "esphome/core/automation.h"
 
@@ -14,7 +15,7 @@ class WiegandReaderTrigger : public Trigger<std::string> {
 class WiegandReader : public PollingComponent {
  public:
   void setup() override;
-  void set_data_pins(GPIOPin *pin_d0, GPIOPin *pin_d1);
+  void set_data_pins(InternalGPIOPin *pin_d0, InternalGPIOPin *pin_d1);
   void dump_config() override;
   void update() override;
   float get_setup_priority() const override;
@@ -24,8 +25,8 @@ class WiegandReader : public PollingComponent {
   unsigned long get_code_();
   bool do_wiegand_conversion_();
 
-  GPIOPin *pin_d0_;
-  GPIOPin *pin_d1_;
+  InternalGPIOPin *pin_d0_;
+  InternalGPIOPin *pin_d1_;
   std::vector<WiegandReaderTrigger *> triggers_;
 
   volatile unsigned long _cardTempHigh;
