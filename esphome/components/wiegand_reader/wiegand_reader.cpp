@@ -182,8 +182,11 @@ std::string WiegandReader::get_code_hex_(std::string rawCode) {
 void WiegandReader::update() {
   InterruptLock lock;
   if (this->do_wiegand_conversion_()) {
-    uint8_t *codeData = reinterpret_cast<uint8_t *>(&(this->_code));
-    std::string code = get_code_hex_(format_hex(codeData, 4));
+    char buffer[17];
+    auto *address16 = reinterpret_cast<uint16_t *>(&(this->_code));
+    snprintf(buffer, sizeof(buffer), "%04X%04X%04X%04X", address16[3], address16[2], address16[1], address16[0]);
+    auto codeStr = std::string(buffer);
+    std::string code = get_code_hex_(codeStr);
 
     ESP_LOGD(TAG, "Data received : %s", code.c_str());
 
