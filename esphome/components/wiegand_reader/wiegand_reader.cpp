@@ -18,7 +18,7 @@ namespace wiegand_reader {
 
 static const char *TAG = "wiegand_reader";
 
-void WiegandReader::read_d0_(WiegandReader *reader) {
+void IRAM_ATTR WiegandReader::read_d0_(WiegandReader *reader) {
   reader->_bitCount++;         // Increament bit count for Interrupt connected to D0
   if (reader->_bitCount > 31)  // If bit count more than 31, process high bits
   {
@@ -31,7 +31,7 @@ void WiegandReader::read_d0_(WiegandReader *reader) {
   reader->_lastWiegand = millis();  // Keep track of last wiegand bit received
 }
 
-void WiegandReader::read_d1_(WiegandReader *reader) {
+void IRAM_ATTR WiegandReader::read_d1_(WiegandReader *reader) {
   reader->_bitCount++;         // Increment bit count for Interrupt connected to D1
   if (reader->_bitCount > 31)  // If bit count more than 31, process high bits
   {
@@ -182,7 +182,8 @@ std::string WiegandReader::get_code_hex_(std::string rawCode) {
 void WiegandReader::update() {
   InterruptLock lock;
   if (this->do_wiegand_conversion_()) {
-    std::string code = get_code_hex_(to_string(this->_code));
+    uint8_t *codeData = reinterpret_cast<uint8_t *>(&(this->_code));
+    std::string code = get_code_hex_(format_hex(codeData, 4));
 
     ESP_LOGD(TAG, "Data received : %s", code.c_str());
 
