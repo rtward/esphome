@@ -236,7 +236,7 @@ class Int64Type(TypeInfo):
     encode_func = "encode_int64"
 
     def dump(self, name):
-        o = f'sprintf(buffer, "%ll", {name});\n'
+        o = f'sprintf(buffer, "%lld", {name});\n'
         o += f"out.append(buffer);"
         return o
 
@@ -249,7 +249,7 @@ class UInt64Type(TypeInfo):
     encode_func = "encode_uint64"
 
     def dump(self, name):
-        o = f'sprintf(buffer, "%ull", {name});\n'
+        o = f'sprintf(buffer, "%llu", {name});\n'
         o += f"out.append(buffer);"
         return o
 
@@ -275,7 +275,7 @@ class Fixed64Type(TypeInfo):
     encode_func = "encode_fixed64"
 
     def dump(self, name):
-        o = f'sprintf(buffer, "%ull", {name});\n'
+        o = f'sprintf(buffer, "%llu", {name});\n'
         o += f"out.append(buffer);"
         return o
 
@@ -417,7 +417,7 @@ class SFixed64Type(TypeInfo):
     encode_func = "encode_sfixed64"
 
     def dump(self, name):
-        o = f'sprintf(buffer, "%ll", {name});\n'
+        o = f'sprintf(buffer, "%lld", {name});\n'
         o += f"out.append(buffer);"
         return o
 
@@ -440,10 +440,10 @@ class SInt64Type(TypeInfo):
     cpp_type = "int64_t"
     default_value = "0"
     decode_varint = "value.as_sint64()"
-    encode_func = "encode_sin64"
+    encode_func = "encode_sint64"
 
     def dump(self, name):
-        o = f'sprintf(buffer, "%ll", {name});\n'
+        o = f'sprintf(buffer, "%lld", {name});\n'
         o += f"out.append(buffer);"
         return o
 
@@ -622,13 +622,13 @@ def build_message_type(desc):
         protected_content.insert(0, prot)
     if decode_64bit:
         decode_64bit.append("default:\n  return false;")
-        o = f"bool {desc.name}::decode_64bit(uint32_t field_id, Proto64bit value) {{\n"
+        o = f"bool {desc.name}::decode_64bit(uint32_t field_id, Proto64Bit value) {{\n"
         o += "  switch (field_id) {\n"
         o += indent("\n".join(decode_64bit), "    ") + "\n"
         o += "  }\n"
         o += "}\n"
         cpp += o
-        prot = "bool decode_64bit(uint32_t field_id, Proto64bit value) override;"
+        prot = "bool decode_64bit(uint32_t field_id, Proto64Bit value) override;"
         protected_content.insert(0, prot)
 
     o = f"void {desc.name}::encode(ProtoWriteBuffer buffer) const {{"
@@ -649,7 +649,7 @@ def build_message_type(desc):
             o += f" {dump[0]} "
         else:
             o += "\n"
-            o += f"  char buffer[64];\n"
+            o += f"  __attribute__((unused)) char buffer[64];\n"
             o += f'  out.append("{desc.name} {{\\n");\n'
             o += indent("\n".join(dump)) + "\n"
             o += f'  out.append("}}");\n'
@@ -661,8 +661,12 @@ def build_message_type(desc):
             o += "\n"
             o += f"  {o2}\n"
     o += "}\n"
+    cpp += f"#ifdef HAS_PROTO_MESSAGE_DUMP\n"
     cpp += o
-    prot = "void dump_to(std::string &out) const override;"
+    cpp += f"#endif\n"
+    prot = "#ifdef HAS_PROTO_MESSAGE_DUMP\n"
+    prot += "void dump_to(std::string &out) const override;\n"
+    prot += "#endif\n"
     public_content.append(prot)
 
     out = f"class {desc.name} : public ProtoMessage {{\n"
@@ -774,7 +778,9 @@ def build_service_message_type(mt):
         hout += f"bool {func}(const {mt.name} &msg);\n"
         cout += f"bool {class_name}::{func}(const {mt.name} &msg) {{\n"
         if log:
+            cout += f"#ifdef HAS_PROTO_MESSAGE_DUMP\n"
             cout += f'  ESP_LOGVV(TAG, "{func}: %s", msg.dump().c_str());\n'
+            cout += f"#endif\n"
         # cout += f'  this->set_nodelay({str(nodelay).lower()});\n'
         cout += f"  return this->send_message_<{mt.name}>(msg, {id_});\n"
         cout += f"}}\n"
@@ -788,7 +794,9 @@ def build_service_message_type(mt):
         case += f"{mt.name} msg;\n"
         case += f"msg.decode(msg_data, msg_size);\n"
         if log:
+            case += f"#ifdef HAS_PROTO_MESSAGE_DUMP\n"
             case += f'ESP_LOGVV(TAG, "{func}: %s", msg.dump().c_str());\n'
+            case += f"#endif\n"
         case += f"this->{func}(msg);\n"
         if ifdef is not None:
             case += f"#endif\n"

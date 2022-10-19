@@ -1,6 +1,5 @@
 import logging
-import typing
-from typing import Callable, List, Optional, Dict, Any, ContextManager
+from typing import Callable, Optional, Any, ContextManager
 from types import ModuleType
 import importlib
 import importlib.util
@@ -8,8 +7,9 @@ import importlib.resources
 import importlib.abc
 import sys
 from pathlib import Path
+from dataclasses import dataclass
 
-from esphome.const import ESP_PLATFORMS, SOURCE_FILE_EXTENSIONS
+from esphome.const import SOURCE_FILE_EXTENSIONS
 import esphome.core.config
 from esphome.core import CORE
 from esphome.types import ConfigType
@@ -17,20 +17,13 @@ from esphome.types import ConfigType
 _LOGGER = logging.getLogger(__name__)
 
 
-class SourceFile:
-    def __init__(
-        self,
-        package: importlib.resources.Package,
-        resource: importlib.resources.Resource,
-    ) -> None:
-        self._package = package
-        self._resource = resource
-
-    def open_binary(self) -> typing.BinaryIO:
-        return importlib.resources.open_binary(self._package, self._resource)
+@dataclass(frozen=True, order=True)
+class FileResource:
+    package: str
+    resource: str
 
     def path(self) -> ContextManager[Path]:
-        return importlib.resources.path(self._package, self._resource)
+        return importlib.resources.path(self.package, self.resource)
 
 
 class ComponentManifest:
@@ -39,6 +32,13 @@ class ComponentManifest:
 
     @property
     def package(self) -> str:
+        """Return the package name the module is contained in.
+
+        Examples:
+        - esphome/components/gpio/__init__.py -> esphome.components.gpio
+        - esphome/components/gpio/switch/__init__.py -> esphome.components.gpio.switch
+        - esphome/components/a4988/stepper.py -> esphome.components.a4988
+        """
         return self.module.__package__
 
     @property
@@ -62,23 +62,19 @@ class ComponentManifest:
         return getattr(self.module, "to_code", None)
 
     @property
-    def esp_platforms(self) -> List[str]:
-        return getattr(self.module, "ESP_PLATFORMS", ESP_PLATFORMS)
-
-    @property
-    def dependencies(self) -> List[str]:
+    def dependencies(self) -> list[str]:
         return getattr(self.module, "DEPENDENCIES", [])
 
     @property
-    def conflicts_with(self) -> List[str]:
+    def conflicts_with(self) -> list[str]:
         return getattr(self.module, "CONFLICTS_WITH", [])
 
     @property
-    def auto_load(self) -> List[str]:
+    def auto_load(self) -> list[str]:
         return getattr(self.module, "AUTO_LOAD", [])
 
     @property
-    def codeowners(self) -> List[str]:
+    def codeowners(self) -> list[str]:
         return getattr(self.module, "CODEOWNERS", [])
 
     @property
@@ -91,23 +87,26 @@ class ComponentManifest:
         return getattr(self.module, "FINAL_VALIDATE_SCHEMA", None)
 
     @property
-    def source_files(self) -> Dict[Path, SourceFile]:
-        ret = {}
+    def resources(self) -> list[FileResource]:
+        """Return a list of all file resources defined in the package of this component.
+
+        This will return all cpp source files that are located in the same folder as the
+        loaded .py file (does not look through subdirectories)
+        """
+        ret = []
         for resource in importlib.resources.contents(self.package):
             if Path(resource).suffix not in SOURCE_FILE_EXTENSIONS:
                 continue
             if not importlib.resources.is_resource(self.package, resource):
                 # Not a resource = this is a directory (yeah this is confusing)
                 continue
-            # Always use / for C++ include names
-            target_path = Path(*self.package.split(".")) / resource
-            ret[target_path] = SourceFile(self.package, resource)
+            ret.append(FileResource(self.package, resource))
         return ret
 
 
 class ComponentMetaFinder(importlib.abc.MetaPathFinder):
     def __init__(
-        self, components_path: Path, allowed_components: Optional[List[str]] = None
+        self, components_path: Path, allowed_components: Optional[list[str]] = None
     ) -> None:
         self._allowed_components = allowed_components
         self._finders = []
@@ -118,7 +117,7 @@ class ComponentMetaFinder(importlib.abc.MetaPathFinder):
                 continue
             self._finders.append(finder)
 
-    def find_spec(self, fullname: str, path: Optional[List[str]], target=None):
+    def find_spec(self, fullname: str, path: Optional[list[str]], target=None):
         if not fullname.startswith("esphome.components."):
             return None
         parts = fullname.split(".")
@@ -145,7 +144,7 @@ def clear_component_meta_finders():
 
 
 def install_meta_finder(
-    components_path: Path, allowed_components: Optional[List[str]] = None
+    components_path: Path, allowed_components: Optional[list[str]] = None
 ):
     sys.meta_path.insert(0, ComponentMetaFinder(components_path, allowed_components))
 

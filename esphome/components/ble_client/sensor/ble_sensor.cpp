@@ -4,14 +4,12 @@
 #include "esphome/core/helpers.h"
 #include "esphome/components/esp32_ble_tracker/esp32_ble_tracker.h"
 
-#ifdef ARDUINO_ARCH_ESP32
+#ifdef USE_ESP32
 
 namespace esphome {
 namespace ble_client {
 
 static const char *const TAG = "ble_sensor";
-
-uint32_t BLESensor::hash_base() { return 343459825UL; }
 
 void BLESensor::loop() {}
 
@@ -43,7 +41,7 @@ void BLESensor::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t ga
     }
     case ESP_GATTC_SEARCH_CMPL_EVT: {
       this->handle = 0;
-      auto chr = this->parent()->get_characteristic(this->service_uuid_, this->char_uuid_);
+      auto *chr = this->parent()->get_characteristic(this->service_uuid_, this->char_uuid_);
       if (chr == nullptr) {
         this->status_set_warning();
         this->publish_state(NAN);
@@ -53,7 +51,7 @@ void BLESensor::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t ga
       }
       this->handle = chr->handle;
       if (this->descr_uuid_.get_uuid().len > 0) {
-        auto descr = chr->get_descriptor(this->descr_uuid_);
+        auto *descr = chr->get_descriptor(this->descr_uuid_);
         if (descr == nullptr) {
           this->status_set_warning();
           this->publish_state(NAN);
@@ -65,18 +63,18 @@ void BLESensor::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t ga
         this->handle = descr->handle;
       }
       if (this->notify_) {
-        auto status =
-            esp_ble_gattc_register_for_notify(this->parent()->gattc_if, this->parent()->remote_bda, chr->handle);
+        auto status = esp_ble_gattc_register_for_notify(this->parent()->get_gattc_if(),
+                                                        this->parent()->get_remote_bda(), chr->handle);
         if (status) {
           ESP_LOGW(TAG, "esp_ble_gattc_register_for_notify failed, status=%d", status);
         }
       } else {
-        this->node_state = espbt::ClientState::Established;
+        this->node_state = espbt::ClientState::ESTABLISHED;
       }
       break;
     }
     case ESP_GATTC_READ_CHAR_EVT: {
-      if (param->read.conn_id != this->parent()->conn_id)
+      if (param->read.conn_id != this->parent()->get_conn_id())
         break;
       if (param->read.status != ESP_GATT_OK) {
         ESP_LOGW(TAG, "Error reading char at handle %d, status=%d", param->read.handle, param->read.status);
@@ -84,20 +82,20 @@ void BLESensor::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t ga
       }
       if (param->read.handle == this->handle) {
         this->status_clear_warning();
-        this->publish_state(this->parse_data(param->read.value, param->read.value_len));
+        this->publish_state(this->parse_data_(param->read.value, param->read.value_len));
       }
       break;
     }
     case ESP_GATTC_NOTIFY_EVT: {
-      if (param->notify.conn_id != this->parent()->conn_id || param->notify.handle != this->handle)
+      if (param->notify.conn_id != this->parent()->get_conn_id() || param->notify.handle != this->handle)
         break;
       ESP_LOGV(TAG, "[%s] ESP_GATTC_NOTIFY_EVT: handle=0x%x, value=0x%x", this->get_name().c_str(),
                param->notify.handle, param->notify.value[0]);
-      this->publish_state(this->parse_data(param->notify.value, param->notify.value_len));
+      this->publish_state(this->parse_data_(param->notify.value, param->notify.value_len));
       break;
     }
     case ESP_GATTC_REG_FOR_NOTIFY_EVT: {
-      this->node_state = espbt::ClientState::Established;
+      this->node_state = espbt::ClientState::ESTABLISHED;
       break;
     }
     default:
@@ -105,7 +103,7 @@ void BLESensor::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t ga
   }
 }
 
-float BLESensor::parse_data(uint8_t *value, uint16_t value_len) {
+float BLESensor::parse_data_(uint8_t *value, uint16_t value_len) {
   if (this->data_to_value_func_.has_value()) {
     std::vector<uint8_t> data(value, value + value_len);
     return (*this->data_to_value_func_)(data);
@@ -115,7 +113,7 @@ float BLESensor::parse_data(uint8_t *value, uint16_t value_len) {
 }
 
 void BLESensor::update() {
-  if (this->node_state != espbt::ClientState::Established) {
+  if (this->node_state != espbt::ClientState::ESTABLISHED) {
     ESP_LOGW(TAG, "[%s] Cannot poll, not connected", this->get_name().c_str());
     return;
   }
@@ -124,8 +122,8 @@ void BLESensor::update() {
     return;
   }
 
-  auto status =
-      esp_ble_gattc_read_char(this->parent()->gattc_if, this->parent()->conn_id, this->handle, ESP_GATT_AUTH_REQ_NONE);
+  auto status = esp_ble_gattc_read_char(this->parent()->get_gattc_if(), this->parent()->get_conn_id(), this->handle,
+                                        ESP_GATT_AUTH_REQ_NONE);
   if (status) {
     this->status_set_warning();
     this->publish_state(NAN);

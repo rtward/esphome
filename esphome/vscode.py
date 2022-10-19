@@ -10,13 +10,13 @@ import esphome.config_validation as cv
 from typing import Optional
 
 
-def _get_invalid_range(res, invalid):
-    # type: (Config, cv.Invalid) -> Optional[DocumentRange]
-    return res.get_deepest_document_range_for_path(invalid.path)
+def _get_invalid_range(res: Config, invalid: cv.Invalid) -> Optional[DocumentRange]:
+    return res.get_deepest_document_range_for_path(
+        invalid.path, invalid.error_message == "extra keys not allowed"
+    )
 
 
-def _dump_range(range):
-    # type: (Optional[DocumentRange]) -> Optional[dict]
+def _dump_range(range: Optional[DocumentRange]) -> Optional[dict]:
     if range is None:
         return None
     return {
@@ -67,7 +67,7 @@ def read_config(args):
         CORE.ace = args.ace
         f = data["file"]
         if CORE.ace:
-            CORE.config_path = os.path.join(args.configuration[0], f)
+            CORE.config_path = os.path.join(args.configuration, f)
         else:
             CORE.config_path = data["file"]
         vs = VSCodeResult()

@@ -5,7 +5,13 @@ import re
 from esphome.yaml_util import ESPHomeDataBase
 
 # pylint: disable=unused-import, wrong-import-order
-from typing import Any, Generator, List, Optional, Tuple, Type, Union, Sequence
+from typing import (
+    Any,
+    Callable,
+    Optional,
+    Union,
+)
+from collections.abc import Generator, Sequence
 
 from esphome.core import (  # noqa
     CORE,
@@ -44,9 +50,9 @@ SafeExpType = Union[
     int,
     float,
     TimePeriod,
-    Type[bool],
-    Type[int],
-    Type[float],
+    type[bool],
+    type[int],
+    type[float],
     Sequence[Any],
 ]
 
@@ -62,14 +68,13 @@ class RawExpression(Expression):
 
 
 class AssignmentExpression(Expression):
-    __slots__ = ("type", "modifier", "name", "rhs", "obj")
+    __slots__ = ("type", "modifier", "name", "rhs")
 
-    def __init__(self, type_, modifier, name, rhs, obj):
+    def __init__(self, type_, modifier, name, rhs):
         self.type = type_
         self.modifier = modifier
         self.name = name
         self.rhs = safe_exp(rhs)
-        self.obj = obj
 
     def __str__(self):
         if self.type is None:
@@ -141,7 +146,7 @@ class CallExpression(Expression):
 class StructInitializer(Expression):
     __slots__ = ("base", "args")
 
-    def __init__(self, base: Expression, *args: Tuple[str, Optional[SafeExpType]]):
+    def __init__(self, base: Expression, *args: tuple[str, Optional[SafeExpType]]):
         self.base = base
         # TODO: args is always a Tuple, is this check required?
         if not isinstance(args, OrderedDict):
@@ -182,7 +187,7 @@ class ArrayInitializer(Expression):
                 cpp += f"  {arg},\n"
             cpp += "}"
         else:
-            cpp = "{" + ", ".join(str(arg) for arg in self.args) + "}"
+            cpp = f"{{{', '.join(str(arg) for arg in self.args)}}}"
         return cpp
 
 
@@ -201,7 +206,7 @@ class ParameterListExpression(Expression):
     __slots__ = ("parameters",)
 
     def __init__(
-        self, *parameters: Union[ParameterExpression, Tuple[SafeExpType, str]]
+        self, *parameters: Union[ParameterExpression, tuple[SafeExpType, str]]
     ):
         self.parameters = []
         for parameter in parameters:
@@ -310,6 +315,31 @@ class FloatLiteral(Literal):
         return f"{self.f}f"
 
 
+class BinOpExpression(Expression):
+    __slots__ = ("op", "lhs", "rhs")
+
+    def __init__(self, lhs: SafeExpType, op: str, rhs: SafeExpType):
+        self.lhs = safe_exp(lhs)
+        self.op = op
+        self.rhs = safe_exp(rhs)
+
+    def __str__(self):
+        # Surround with parentheses to ensure generated code has same
+        # order as python one
+        return f"({self.lhs} {self.op} {self.rhs})"
+
+
+class UnaryOpExpression(Expression):
+    __slots__ = ("op", "exp")
+
+    def __init__(self, op: str, exp: SafeExpType):
+        self.op = op
+        self.exp = safe_exp(exp)
+
+    def __str__(self):
+        return f"({self.op}{self.exp})"
+
+
 def safe_exp(obj: SafeExpType) -> Expression:
     """Try to convert obj to an expression by automatically converting native python types to
     expressions/literals.
@@ -348,13 +378,11 @@ def safe_exp(obj: SafeExpType) -> Expression:
         return float_
     if isinstance(obj, ID):
         raise ValueError(
-            "Object {} is an ID. Did you forget to register the variable?"
-            "".format(obj)
+            f"Object {obj} is an ID. Did you forget to register the variable?"
         )
     if inspect.isgenerator(obj):
         raise ValueError(
-            "Object {} is a coroutine. Did you forget to await the expression with "
-            "'await'?".format(obj)
+            f"Object {obj} is a coroutine. Did you forget to await the expression with 'await'?"
         )
     raise ValueError("Object is not an expression", obj)
 
@@ -404,8 +432,8 @@ class LineComment(Statement):
 class ProgmemAssignmentExpression(AssignmentExpression):
     __slots__ = ()
 
-    def __init__(self, type_, name, rhs, obj):
-        super().__init__(type_, "", name, rhs, obj)
+    def __init__(self, type_, name, rhs):
+        super().__init__(type_, "", name, rhs)
 
     def __str__(self):
         return f"static const {self.type} {self.name}[] PROGMEM = {self.rhs}"
@@ -414,8 +442,8 @@ class ProgmemAssignmentExpression(AssignmentExpression):
 class StaticConstAssignmentExpression(AssignmentExpression):
     __slots__ = ()
 
-    def __init__(self, type_, name, rhs, obj):
-        super().__init__(type_, "", name, rhs, obj)
+    def __init__(self, type_, name, rhs):
+        super().__init__(type_, "", name, rhs)
 
     def __str__(self):
         return f"static const {self.type} {self.name}[] = {self.rhs}"
@@ -424,7 +452,7 @@ class StaticConstAssignmentExpression(AssignmentExpression):
 def progmem_array(id_, rhs) -> "MockObj":
     rhs = safe_exp(rhs)
     obj = MockObj(id_, ".")
-    assignment = ProgmemAssignmentExpression(id_.type, id_, rhs, obj)
+    assignment = ProgmemAssignmentExpression(id_.type, id_, rhs)
     CORE.add(assignment)
     CORE.register_variable(id_, obj)
     return obj
@@ -433,7 +461,7 @@ def progmem_array(id_, rhs) -> "MockObj":
 def static_const_array(id_, rhs) -> "MockObj":
     rhs = safe_exp(rhs)
     obj = MockObj(id_, ".")
-    assignment = StaticConstAssignmentExpression(id_.type, id_, rhs, obj)
+    assignment = StaticConstAssignmentExpression(id_.type, id_, rhs)
     CORE.add(assignment)
     CORE.register_variable(id_, obj)
     return obj
@@ -446,7 +474,9 @@ def statement(expression: Union[Expression, Statement]) -> Statement:
     return ExpressionStatement(expression)
 
 
-def variable(id_: ID, rhs: SafeExpType, type_: "MockObj" = None) -> "MockObj":
+def variable(
+    id_: ID, rhs: SafeExpType, type_: "MockObj" = None, register=True
+) -> "MockObj":
     """Declare a new variable, not pointer type, in the code generation.
 
     :param id_: The ID used to declare the variable.
@@ -461,10 +491,37 @@ def variable(id_: ID, rhs: SafeExpType, type_: "MockObj" = None) -> "MockObj":
     obj = MockObj(id_, ".")
     if type_ is not None:
         id_.type = type_
-    assignment = AssignmentExpression(id_.type, "", id_, rhs, obj)
+    assignment = AssignmentExpression(id_.type, "", id_, rhs)
     CORE.add(assignment)
-    CORE.register_variable(id_, obj)
+    if register:
+        CORE.register_variable(id_, obj)
     return obj
+
+
+def with_local_variable(
+    id_: ID, rhs: SafeExpType, callback: Callable[["MockObj"], None], *args
+) -> None:
+    """Declare a new variable, not pointer type, in the code generation, within a scoped block
+    The variable is only usable within the callback
+    The callback cannot be async.
+
+    :param id_: The ID used to declare the variable.
+    :param rhs: The expression to place on the right hand side of the assignment.
+    :param callback: The function to invoke that will receive the temporary variable
+    :param args: args to pass to the callback in addition to the temporary variable
+
+    """
+
+    # throw if the callback is async:
+    assert not inspect.iscoroutinefunction(
+        callback
+    ), "with_local_variable() callback cannot be async!"
+
+    CORE.add(RawStatement("{"))  # output opening curly brace
+    obj = variable(id_, rhs, None, True)
+    # invoke user-provided callback to generate code with this local variable
+    callback(obj, *args)
+    CORE.add(RawStatement("}"))  # output closing curly brace
 
 
 def new_variable(id_: ID, rhs: SafeExpType, type_: "MockObj" = None) -> "MockObj":
@@ -484,7 +541,7 @@ def new_variable(id_: ID, rhs: SafeExpType, type_: "MockObj" = None) -> "MockObj
         id_.type = type_
     decl = VariableDeclarationExpression(id_.type, "", id_)
     CORE.add_global(decl)
-    assignment = AssignmentExpression(None, "", id_, rhs, obj)
+    assignment = AssignmentExpression(None, "", id_, rhs)
     CORE.add(assignment)
     CORE.register_variable(id_, obj)
     return obj
@@ -506,7 +563,7 @@ def Pvariable(id_: ID, rhs: SafeExpType, type_: "MockObj" = None) -> "MockObj":
         id_.type = type_
     decl = VariableDeclarationExpression(id_.type, "*", id_)
     CORE.add_global(decl)
-    assignment = AssignmentExpression(None, None, id_, rhs, obj)
+    assignment = AssignmentExpression(None, None, id_, rhs)
     CORE.add(assignment)
     CORE.register_variable(id_, obj)
     return obj
@@ -543,13 +600,13 @@ def add_global(expression: Union[SafeExpType, Statement]):
     CORE.add_global(expression)
 
 
-def add_library(name: str, version: Optional[str]):
+def add_library(name: str, version: Optional[str], repository: Optional[str] = None):
     """Add a library to the codegen library storage.
 
     :param name: The name of the library (for example 'AsyncTCP')
     :param version: The version of the library, may be None.
     """
-    CORE.add_library(Library(name, version))
+    CORE.add_library(Library(name, version, repository))
 
 
 def add_build_flag(build_flag: str):
@@ -568,6 +625,10 @@ def add_define(name: str, value: SafeExpType = None):
         CORE.add_define(Define(name, safe_exp(value)))
 
 
+def add_platformio_option(key: str, value: Union[str, list[str]]):
+    CORE.add_platformio_option(key, value)
+
+
 async def get_variable(id_: ID) -> "MockObj":
     """
     Wait for the given ID to be defined in the code generation and
@@ -581,7 +642,7 @@ async def get_variable(id_: ID) -> "MockObj":
     return await CORE.get_variable(id_)
 
 
-async def get_variable_with_full_id(id_: ID) -> Tuple[ID, "MockObj"]:
+async def get_variable_with_full_id(id_: ID) -> tuple[ID, "MockObj"]:
     """
     Wait for the given ID to be defined in the code generation and
     return it as a MockObj.
@@ -596,7 +657,7 @@ async def get_variable_with_full_id(id_: ID) -> Tuple[ID, "MockObj"]:
 
 async def process_lambda(
     value: Lambda,
-    parameters: List[Tuple[SafeExpType, str]],
+    parameters: list[tuple[SafeExpType, str]],
     capture: str = "=",
     return_type: SafeExpType = None,
 ) -> Generator[LambdaExpression, None, None]:
@@ -611,7 +672,7 @@ async def process_lambda(
     :param return_type: The return type of the lambda.
     :return: The generated lambda expression.
     """
-    from esphome.components.globals import GlobalsComponent
+    from esphome.components.globals import GlobalsComponent, RestoringGlobalsComponent
 
     if value is None:
         return
@@ -621,7 +682,10 @@ async def process_lambda(
         if (
             full_id is not None
             and isinstance(full_id.type, MockObjClass)
-            and full_id.type.inherits_from(GlobalsComponent)
+            and (
+                full_id.type.inherits_from(GlobalsComponent)
+                or full_id.type.inherits_from(RestoringGlobalsComponent)
+            )
         ):
             parts[i * 3 + 1] = var.value()
             continue
@@ -647,7 +711,7 @@ def is_template(value):
 
 async def templatable(
     value: Any,
-    args: List[Tuple[SafeExpType, str]],
+    args: list[tuple[SafeExpType, str]],
     output_type: Optional[SafeExpType],
     to_exp: Any = None,
 ):
@@ -695,7 +759,7 @@ class MockObj(Expression):
             attr = attr[1:]
         return MockObj(f"{self.base}{self.op}{attr}", next_op)
 
-    def __call__(self, *args):  # type: (SafeExpType) -> MockObj
+    def __call__(self, *args: SafeExpType) -> "MockObj":
         call = CallExpression(self.base, *args)
         return MockObj(call, self.op)
 
@@ -703,7 +767,7 @@ class MockObj(Expression):
         return str(self.base)
 
     def __repr__(self):
-        return "MockObj<{}>".format(str(self.base))
+        return f"MockObj<{str(self.base)}>"
 
     @property
     def _(self) -> "MockObj":
@@ -714,6 +778,7 @@ class MockObj(Expression):
         return MockObj(f"new {self.base}", "->")
 
     def template(self, *args: SafeExpType) -> "MockObj":
+        """Apply template parameters to this object."""
         if len(args) != 1 or not isinstance(args[0], TemplateArguments):
             args = TemplateArguments(*args)
         else:
@@ -734,13 +799,19 @@ class MockObj(Expression):
         return MockObjEnum(enum=name, is_class=is_class, base=self.base, op=self.op)
 
     def operator(self, name: str) -> "MockObj":
+        """Various other operations.
+
+        Named operator because it's a C++ keyword and can't occur in valid code.
+        """
         if name == "ref":
             return MockObj(f"{self.base} &", "")
         if name == "ptr":
             return MockObj(f"{self.base} *", "")
+        if name == "const_ptr":
+            return MockObj(f"{self.base} *const", "")
         if name == "const":
             return MockObj(f"const {self.base}", "")
-        raise ValueError("Expected one of ref, ptr, const.")
+        raise ValueError("Expected one of ref, ptr, const_ptr, const.")
 
     @property
     def using(self) -> "MockObj":
@@ -754,6 +825,162 @@ class MockObj(Expression):
             next_op = "->"
         return MockObj(f"{self.base}[{item}]", next_op)
 
+    def __lt__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(self, "<", other)
+        return MockObj(op)
+
+    def __le__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(self, "<=", other)
+        return MockObj(op)
+
+    def __eq__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(self, "==", other)
+        return MockObj(op)
+
+    def __ne__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(self, "!=", other)
+        return MockObj(op)
+
+    def __gt__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(self, ">", other)
+        return MockObj(op)
+
+    def __ge__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(self, ">=", other)
+        return MockObj(op)
+
+    def __add__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(self, "+", other)
+        return MockObj(op)
+
+    def __sub__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(self, "-", other)
+        return MockObj(op)
+
+    def __mul__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(self, "*", other)
+        return MockObj(op)
+
+    def __truediv__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(self, "/", other)
+        return MockObj(op)
+
+    def __mod__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(self, "%", other)
+        return MockObj(op)
+
+    def __lshift__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(self, "<<", other)
+        return MockObj(op)
+
+    def __rshift__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(self, ">>", other)
+        return MockObj(op)
+
+    def __and__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(self, "&", other)
+        return MockObj(op)
+
+    def __xor__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(self, "^", other)
+        return MockObj(op)
+
+    def __or__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(self, "|", other)
+        return MockObj(op)
+
+    def __radd__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(other, "+", self)
+        return MockObj(op)
+
+    def __rsub__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(other, "-", self)
+        return MockObj(op)
+
+    def __rmul__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(other, "*", self)
+        return MockObj(op)
+
+    def __rtruediv__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(other, "/", self)
+        return MockObj(op)
+
+    def __rmod__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(other, "%", self)
+        return MockObj(op)
+
+    def __rlshift__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(other, "<<", self)
+        return MockObj(op)
+
+    def __rrshift__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(other, ">>", self)
+        return MockObj(op)
+
+    def __rand__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(other, "&", self)
+        return MockObj(op)
+
+    def __rxor__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(other, "^", self)
+        return MockObj(op)
+
+    def __ror__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(other, "|", self)
+        return MockObj(op)
+
+    def __iadd__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(self, "+=", other)
+        return MockObj(op)
+
+    def __isub__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(self, "-=", other)
+        return MockObj(op)
+
+    def __imul__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(self, "*=", other)
+        return MockObj(op)
+
+    def __itruediv__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(self, "/=", other)
+        return MockObj(op)
+
+    def __imod__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(self, "%=", other)
+        return MockObj(op)
+
+    def __ilshift__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(self, "<<=", other)
+        return MockObj(op)
+
+    def __irshift__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(self, ">>=", other)
+        return MockObj(op)
+
+    def __iand__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(self, "&=", other)
+        return MockObj(op)
+
+    def __ixor__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(self, "^=", other)
+        return MockObj(op)
+
+    def __ior__(self, other: SafeExpType) -> "MockObj":
+        op = BinOpExpression(self, "|=", other)
+        return MockObj(op)
+
+    def __neg__(self) -> "MockObj":
+        op = UnaryOpExpression("-", self)
+        return MockObj(op)
+
+    def __pos__(self) -> "MockObj":
+        op = UnaryOpExpression("+", self)
+        return MockObj(op)
+
+    def __invert__(self) -> "MockObj":
+        op = UnaryOpExpression("~", self)
+        return MockObj(op)
+
 
 class MockObjEnum(MockObj):
     def __init__(self, *args, **kwargs):
@@ -761,8 +988,8 @@ class MockObjEnum(MockObj):
         self._is_class = kwargs.pop("is_class")
         base = kwargs.pop("base")
         if self._is_class:
-            base = base + "::" + self._enum
-            kwargs["op"] = "::"
+            base = f"{base}::{self._enum}"
+        kwargs["op"] = "::"
         kwargs["base"] = base
         MockObj.__init__(self, *args, **kwargs)
 
@@ -788,10 +1015,10 @@ class MockObjClass(MockObj):
             self._parents += paren._parents
 
     def inherits_from(self, other: "MockObjClass") -> bool:
-        if self == other:
+        if str(self) == str(other):
             return True
         for parent in self._parents:
-            if parent == other:
+            if str(parent) == str(other):
                 return True
         return False
 

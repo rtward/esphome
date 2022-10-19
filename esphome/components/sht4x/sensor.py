@@ -1,6 +1,6 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import i2c, sensor
+from esphome.components import i2c, sensor, sensirion_common
 from esphome.const import (
     CONF_ID,
     CONF_TEMPERATURE,
@@ -16,10 +16,13 @@ from esphome.const import (
 
 CODEOWNERS = ["@sjtrny"]
 DEPENDENCIES = ["i2c"]
+AUTO_LOAD = ["sensirion_common"]
 
 sht4x_ns = cg.esphome_ns.namespace("sht4x")
 
-SHT4XComponent = sht4x_ns.class_("SHT4XComponent", cg.PollingComponent, i2c.I2CDevice)
+SHT4XComponent = sht4x_ns.class_(
+    "SHT4XComponent", cg.PollingComponent, sensirion_common.SensirionI2CDevice
+)
 
 CONF_PRECISION = "precision"
 SHT4XPRECISION = sht4x_ns.enum("SHT4XPRECISION")
@@ -51,18 +54,18 @@ CONFIG_SCHEMA = (
         {
             cv.GenerateID(): cv.declare_id(SHT4XComponent),
             cv.Optional(CONF_TEMPERATURE): sensor.sensor_schema(
-                UNIT_CELSIUS,
-                ICON_THERMOMETER,
-                2,
-                DEVICE_CLASS_TEMPERATURE,
-                STATE_CLASS_MEASUREMENT,
+                unit_of_measurement=UNIT_CELSIUS,
+                icon=ICON_THERMOMETER,
+                accuracy_decimals=2,
+                device_class=DEVICE_CLASS_TEMPERATURE,
+                state_class=STATE_CLASS_MEASUREMENT,
             ),
             cv.Optional(CONF_HUMIDITY): sensor.sensor_schema(
-                UNIT_PERCENT,
-                ICON_WATER_PERCENT,
-                2,
-                DEVICE_CLASS_HUMIDITY,
-                STATE_CLASS_MEASUREMENT,
+                unit_of_measurement=UNIT_PERCENT,
+                icon=ICON_WATER_PERCENT,
+                accuracy_decimals=2,
+                device_class=DEVICE_CLASS_HUMIDITY,
+                state_class=STATE_CLASS_MEASUREMENT,
             ),
             cv.Optional(CONF_PRECISION, default="High"): cv.enum(PRECISION_OPTIONS),
             cv.Optional(CONF_HEATER_POWER, default="High"): cv.enum(

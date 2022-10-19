@@ -2,7 +2,15 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import automation
 from esphome.components import sensor
-from esphome.const import CONF_ID, CONF_SENSOR, CONF_RESTORE
+from esphome.const import (
+    CONF_ICON,
+    CONF_ID,
+    CONF_SENSOR,
+    CONF_RESTORE,
+    CONF_UNIT_OF_MEASUREMENT,
+    CONF_ACCURACY_DECIMALS,
+)
+from esphome.core.entity_helpers import inherit_property_from
 
 integration_ns = cg.esphome_ns.namespace("integration")
 IntegrationSensor = integration_ns.class_(
@@ -28,6 +36,18 @@ INTEGRATION_METHODS = {
 CONF_TIME_UNIT = "time_unit"
 CONF_INTEGRATION_METHOD = "integration_method"
 
+
+def inherit_unit_of_measurement(uom, config):
+    suffix = config[CONF_TIME_UNIT]
+    if uom.endswith("/" + suffix):
+        return uom[0 : -len("/" + suffix)]
+    return uom + suffix
+
+
+def inherit_accuracy_decimals(decimals, config):
+    return decimals + 2
+
+
 CONFIG_SCHEMA = sensor.SENSOR_SCHEMA.extend(
     {
         cv.GenerateID(): cv.declare_id(IntegrationSensor),
@@ -37,8 +57,32 @@ CONFIG_SCHEMA = sensor.SENSOR_SCHEMA.extend(
             INTEGRATION_METHODS, lower=True
         ),
         cv.Optional(CONF_RESTORE, default=False): cv.boolean,
+        cv.Optional("min_save_interval"): cv.invalid(
+            "min_save_interval was removed in 2022.8.0. Please use the `preferences` -> `flash_write_interval` to adjust."
+        ),
     }
 ).extend(cv.COMPONENT_SCHEMA)
+
+
+FINAL_VALIDATE_SCHEMA = cv.All(
+    cv.Schema(
+        {
+            cv.Required(CONF_ID): cv.use_id(IntegrationSensor),
+            cv.Optional(CONF_ICON): cv.icon,
+            cv.Optional(CONF_UNIT_OF_MEASUREMENT): sensor.validate_unit_of_measurement,
+            cv.Optional(CONF_ACCURACY_DECIMALS): sensor.validate_accuracy_decimals,
+            cv.Required(CONF_SENSOR): cv.use_id(sensor.Sensor),
+        },
+        extra=cv.ALLOW_EXTRA,
+    ),
+    inherit_property_from(CONF_ICON, CONF_SENSOR),
+    inherit_property_from(
+        CONF_UNIT_OF_MEASUREMENT, CONF_SENSOR, transform=inherit_unit_of_measurement
+    ),
+    inherit_property_from(
+        CONF_ACCURACY_DECIMALS, CONF_SENSOR, transform=inherit_accuracy_decimals
+    ),
+)
 
 
 async def to_code(config):
